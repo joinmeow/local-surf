@@ -14,6 +14,12 @@ const isPageContext = !isExtensionContext;
 
 // default target host
 const LOCALSTACK_HOST = "localhost.localstack.cloud:4566";
+const AWS_API_REGEX = /^https:\/\/((?:[a-z0-9-]+\.)+)amazonaws\.com(?::[0-9]*)?(\/.*)?/;
+
+const extractAwsPath = (url) => {
+    const match = url.match(AWS_API_REGEX);
+    return match ? {match, path: (match[2] || '').replace(/^\//, '')} : null;
+};
 
 // list of XHR proxy attributes - see https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest
 const XHR_PROXY_ATTRS = ["statusText", "responseType", "response", "responseText", "readyState", "responseXML", "responseURL", "status", "statusText", "withCredentials", "timeout"];
@@ -91,10 +97,9 @@ const patchXMLHttpRequest = () => {
     }
     XMLHttpRequest.prototype.open = function(...args) {
         // TODO: clean up this function, make URL patterns configurable!
-        const regex = /^https:\/\/(([a-z0-9-]+\.)+)amazonaws\.com:?[0-9]*\/.*/;
-        const match = args[1].match(regex);
-        if (args.length > 2 && match) {
-            const path = _partition(_partition(args[1], "://")[1], "/")[1];
+        const info = extractAwsPath(args[1]);
+        if (args.length > 2 && info) {
+            const {match, path} = info;
             args[1] = `https://${LOCALSTACK_HOST}/${path}`;
             if (match[1].match(/.*execute-api.*/)) {
                 args[1] = `https://${match[1]}${LOCALSTACK_HOST}/${path}`;
@@ -174,11 +179,11 @@ const patchFetchAPI = () => {
 
     const fetchOrig = fetch;
     window.fetch = async function (...args) {
-        const regex = /^https:\/\/([a-z0-9-]+\.)+amazonaws\.com:?\/.*/;
         const href = args[0].constructor == URL ? args[0].href : args[0];
         const isExcluded = href.match(/.*unifiedsearch\.amazonaws\.com.*/);
-        if (args.length > 0 && !isExcluded && href.match(regex)) {
-            const path = _partition(_partition(href, '://')[1], '/')[1];
+        const info = extractAwsPath(href);
+        if (args.length > 0 && !isExcluded && info) {
+            const {path} = info;
             args[0] =
                 args[0].constructor == URL
                     ? new URL(`https://${LOCALSTACK_HOST}/${path}`)
